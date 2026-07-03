@@ -1,36 +1,77 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🍞 CA Food Finder
 
-## Getting Started
+A free, privacy-first map + list of places to **get free food** or **donate
+food** across California's 10 largest metros. No sign-up required to browse.
 
-First, run the development server:
+Built with Next.js (App Router, TypeScript, Tailwind), MapLibre GL with
+OpenFreeMap tiles, and open data from OpenStreetMap.
+
+## Quick start
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev        # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The admin dashboard lives at `/admin` — set `ADMIN_KEY` in `.env.local`
+(change the default before deploying!).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Data pipeline
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+# 1. Fetch raw data from the Overpass API (OpenStreetMap)
+curl -sS -A "ca-food-finder-ingest/0.1 (contact: you@example.com)" \
+  -X POST --data-urlencode data@scripts/ingest/sources/osm-query.txt \
+  https://overpass-api.de/api/interpreter -o data/raw-osm.json
 
-## Learn More
+# 2. Normalize + dedupe + metro-tag → data/locations.json
+node scripts/ingest/normalize.mjs
+```
 
-To learn more about Next.js, take a look at the following resources:
+Re-run weekly to stay fresh (set up a cron job or GitHub Action).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- **Current sources:** OpenStreetMap (© OpenStreetMap contributors, ODbL —
+  attribution is rendered on every listing and on the map).
+- **Planned sources:** USDA meal-site data, CA Association of Food Banks
+  directory, Food Oasis LA. Add a new adapter function in
+  `scripts/ingest/normalize.mjs` per source (see `fromOsm`).
+- **Never** ingest Google Places data — its terms forbid storing results.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+`data/ca-zips.json` holds CA ZIP-code centroids from the 2023 US Census ZCTA
+gazetteer (public domain) and powers the ZIP search offline.
 
-## Deploy on Vercel
+## Architecture notes
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- **Locations** are served statically from `data/locations.json` — at this
+  scale (hundreds of records) no database is needed and distance sorting is
+  done client-side with haversine. When the dataset grows past ~10k records,
+  migrate to Supabase Postgres + PostGIS (`ORDER BY location <-> point`).
+- **Reports** (`/api/report`) are stored in `data/reports.json` with
+  IP rate-limiting (5/hour) and a honeypot field. ⚠️ On Vercel the filesystem
+  is ephemeral — before deploying, swap the file read/write in
+  `src/app/api/report/route.ts` and `src/app/api/admin/reports/route.ts`
+  for a Supabase table (`reports`: id, location_id, issue_type, details,
+  status, created_at). The UI needs no changes.
+- **Hours**: OSM `opening_hours` strings are parsed by a deliberately
+  conservative parser (`src/lib/hours.ts`) — anything it can't parse shows
+  as "unknown" rather than guessing wrong, so the "Open now" filter never
+  lies.
+- **PWA**: `src/app/manifest.ts` makes the app installable to a phone's
+  home screen.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Deploying (free tier)
+
+1. Push to GitHub, import into [Vercel](https://vercel.com) — zero config.
+2. Set `ADMIN_KEY` in Vercel's environment variables.
+3. (Before real traffic) create a free [Supabase](https://supabase.com)
+   project and move reports storage there, per the note above.
+
+## Roadmap
+
+- [ ] USDA + CAFB + Food Oasis LA ingestion adapters (fills sparse metros:
+      San Diego, Anaheim, Bakersfield)
+- [ ] Reports storage on Supabase; optional accounts (magic link) + favorites
+- [ ] Spanish translation
+- [ ] Verified-badge workflow; auto-flag listings with 2+ unresolved reports
+- [ ] Eligibility / dietary / no-ID filters once source data supports them
+- [ ] Statewide rural coverage, then other states

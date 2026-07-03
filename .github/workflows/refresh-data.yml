@@ -1,0 +1,38 @@
+name: Weekly data refresh
+
+on:
+  schedule:
+    # Sundays 11:30 UTC ≈ 3:30 AM Pacific
+    - cron: "30 11 * * 0"
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Fetch all sources
+        run: node scripts/ingest/fetch.mjs
+
+      - name: Normalize + dedupe
+        run: node scripts/ingest/normalize.mjs
+
+      - name: Commit refreshed data (triggers Vercel deploy)
+        run: |
+          git config user.name "data-refresh-bot"
+          git config user.email "actions@github.com"
+          git add data/
+          if git diff --cached --quiet; then
+            echo "No data changes this week."
+          else
+            git commit -m "chore: weekly data refresh $(date -u +%Y-%m-%d)"
+            git push
+          fi

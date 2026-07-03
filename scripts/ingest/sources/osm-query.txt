@@ -1,0 +1,8 @@
+[out:json][timeout:180];
+area["ISO3166-2"="US-CA"][admin_level=4]->.ca;
+(
+  nwr["social_facility"="food_bank"](area.ca);
+  nwr["social_facility"="soup_kitchen"](area.ca);
+  nwr["amenity"="social_facility"]["social_facility:for"~"hunger",i](area.ca);
+);
+out center tags;
